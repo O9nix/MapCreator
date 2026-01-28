@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Прямые линии на канвасе</title>
+    <style>
+        canvas {
+            border: 2px solid #000;
+            cursor: crosshair;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        button {
+            margin-right: 10px;
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="clearCanvas()">Очистить</button>
+        <label>Цвет: <input type="color" id="colorPicker" value="#000000"></label>
+        <label>Путь:  <input type="checkbox" name="path" id="path"></label>
+        <label>Толщина: <input type="range" id="lineWidth" min="1" max="20" value="2"></label>
+    </div>
+    <canvas id="drawingCanvas" width="800" height="600"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const colorPicker = document.getElementById('colorPicker');
+        const lineWidth = document.getElementById('lineWidth');
+        const pathPicker= document.getElementById('path');
+
+        // Состояние
+        let isDrawing = false;
+        let isPath = false;
+        let startX = 0;
+        let startY = 0;
+        let currentX = 0;
+        let currentY = 0;
+        
+        let lines =[]
+        let arc = [];
+
+
+        pathPicker.addEventListener('change', function() {
+  
+       isPath = this.checked
+    
+});
+        // Начало рисования - запоминаем начальную точку
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+
+            currentX = startX;
+            currentY = startY;
+
+            if(!isPath || lines.length<1){
+            startX = e.offsetX;
+            startY = e.offsetY;
+            }else{
+          
+            startX = lines.at(-1).x2;
+            startY = lines.at(-1).y2;
+            }
+
+        });
+        
+        // Предпросмотр линии при движении
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            
+            // Сохраняем текущую позицию
+            currentX = e.offsetX;
+            currentY = e.offsetY;
+            
+            // Перерисовываем канвас
+            redraw();
+            
+            // Рисуем временную линию
+            drawLine(startX, startY, currentX, currentY, true);
+               drawArc(startX,startY,true)
+        });
+        
+        // Завершение рисования
+        canvas.addEventListener('mouseup', () => {
+            if (isDrawing) {
+                // Рисуем финальную линию
+                drawLine(startX, startY, currentX, currentY, false);
+                drawArc(startX,startY,false)
+                // Сохраняем линию с её параметрами
+                lines.push({
+                    x1: startX,
+                    y1: startY,
+                    x2: currentX,
+                    y2: currentY,
+                    color: colorPicker.value,
+                    width: lineWidth.value
+                });
+                  arc.push({
+                    x1: startX,
+                    y1: startY,
+                    color: colorPicker.value
+                });
+                 arc.push({
+                    x1: currentX,
+                    y1: currentY,
+                    color: colorPicker.value
+                });
+            }
+            isDrawing = false;
+        });
+        
+        // Выход за пределы
+        canvas.addEventListener('mouseout', () => {
+            isDrawing = false;
+        });
+        
+        // Функция рисования линии
+        function drawLine(x1, y1, x2, y2, isPreview) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = colorPicker.value;
+            ctx.lineWidth = lineWidth.value;
+            ctx.lineCap = 'round';
+            
+            if (isPreview) {
+                ctx.setLineDash([5, 5]); // Пунктир для предпросмотра
+            } else {
+                ctx.setLineDash([]); // Сплошная линия
+            }
+            
+            ctx.stroke();
+            drawArc(x2,y2,isPreview)
+        }
+        function drawArc(x1, y1,isPreview){
+            ctx.beginPath();
+ctx.arc(x1, y1, 5, 0, 2 * Math.PI);
+ if (isPreview) {
+                ctx.setLineDash([5, 5]); // Пунктир для предпросмотра
+            } else {
+                ctx.setLineDash([]); // Сплошная линия
+            }
+ctx.stroke();
+
+        }
+        // Перерисовка канваса (сохраняет все нарисованные линии)
+        function redraw() {
+            // Очищаем канвас
+            clearCanvas();
+           
+            // Перерисовываем все сохранённые линии
+            lines.forEach(line => {
+                ctx.beginPath();
+                ctx.moveTo(line.x1, line.y1);
+                ctx.lineTo(line.x2, line.y2);
+                ctx.strokeStyle = line.color;
+                ctx.lineWidth = line.width;
+                ctx.lineCap = 'round';
+                ctx.setLineDash([]);
+                ctx.stroke();
+            });
+            arc.forEach(arc=>{
+                            ctx.beginPath();
+ctx.arc(arc.x1, arc.y1, 5, 0, 2 * Math.PI);
+ctx.stroke();
+            })
+     
+        }
+        
+        // Очистка канваса
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    </script>
+</body>
+</html>
