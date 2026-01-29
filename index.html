@@ -1,30 +1,26 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <title>Прямые линии на канвасе</title>
     <style>
         canvas {
-            border: 2px solid #000;
+            border: 2px solid #0000; /* fixed typo */
             cursor: crosshair;
         }
-
         .controls {
             margin: 10px 0;
         }
-
         button {
             margin-right: 10px;
             padding: 5px 10px;
         }
     </style>
 </head>
-
 <body>
     <div class="controls">
         <button onclick="clearCanvas()">Очистить</button>
         <label>Цвет: <input type="color" id="colorPicker" value="#000000"></label>
-        <label>Путь: <input type="checkbox" name="path" id="path"></label>
+        <label>Путь: <input type="checkbox" id="path"></label>
         <label>Толщина: <input type="range" id="lineWidth" min="1" max="20" value="2"></label>
     </div>
     <canvas id="drawingCanvas" width="800" height="600"></canvas>
@@ -34,142 +30,125 @@
         const ctx = canvas.getContext('2d');
         const colorPicker = document.getElementById('colorPicker');
         const lineWidth = document.getElementById('lineWidth');
-        const pathPicker = document.getElementById('path');
+        const pathCheckbox = document.getElementById('path');
 
-        // Состояние
-        let isDrawing = false;
-        let isPath = false;
-        let startX = 0;
-        let startY = 0;
-        let currentX = 0;
-        let currentY = 0;
         const NODE_RADIUS = 6;
-        let lines = []
-        let arc = [];
+        const SNAP_TOLERANCE = 10; // pixels
 
+        let isDrawing = false;
+        let startX = 0, startY = 0;
+        let currentX = 0, currentY = 0;
+        let lines = [];
+        let nodes = []; // store unique nodes: {x, y, color}
 
-        pathPicker.addEventListener('change', function () {
-
-            isPath = this.checked
-
-        });
-        // Начало рисования - запоминаем начальную точку
-        canvas.addEventListener('mousedown', (e) => {
-            isDrawing = true;
-
-            currentX = startX;
-            currentY = startY;
-
-            if (!isPath || lines.length < 1) {
-                startX = e.offsetX;
-                startY = e.offsetY;
-            } else {
-
-                startX = lines.at(-1).x2;
-                startY = lines.at(-1).y2;
-            }
-
-        });
-
-
-        function findNodeAt(x, y, includeCurrent = true) {
-            for (let i = 0; i < arc.length; i++) {
-                const node = arc[i];
-
-                const dist = Math.sqrt((x - node.x) ** 2 + (y - node.y) ** 2);
-                if (dist <= NODE_RADIUS + 4) {
-                    return { regionIndex: -1, nodeIndex: i, isExisting: false };
+        // Helper: find node near (x, y)
+        function findNodeNear(x, y) {
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+                const dx = x - node.x;
+                const dy = y - node.y;
+                if (Math.sqrt(dx * dx + dy * dy) <= SNAP_TOLERANCE) {
+                    return { index: i, x: node.x, y: node.y };
                 }
             }
-            return null
+            return null;
         }
-        // Предпросмотр линии при движении
+
+        // Add node only if not near existing one
+        function addNode(x, y, color) {
+            const existing = findNodeNear(x, y);
+            if (existing) {
+                return existing; // reuse existing
+            }
+            const newNode = { x, y, color };
+            nodes.push(newNode);
+            return { index: nodes.length - 1, x, y };
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            const x = e.offsetX;
+            const y = e.offsetY;
+
+            let snap = findNodeNear(x, y);
+            if (snap) {
+                startX = snap.x;
+                startY = snap.y;
+            } else if (pathCheckbox.checked && lines.length > 0) {
+                // Path mode: start from last line's end
+                const lastLine = lines[lines.length - 1];
+                startX = lastLine.x2;
+                startY = lastLine.y2;
+            } else {
+                // Normal mode or first line
+                startX = x;
+                startY = y;
+                // Add start node only if not snapped
+                if (!snap) addNode(startX, startY, colorPicker.value);
+            }
+
+            isDrawing = true;
+        });
+
         canvas.addEventListener('mousemove', (e) => {
-
-
-            // Сохраняем текущую позицию
             currentX = e.offsetX;
             currentY = e.offsetY;
-            const existingNode = findNodeAt(currentX, currentY, false);
-            if (existingNode) { console.log(existingNode) }
-            // Перерисовываем канвас
-            if (!isDrawing) return;
-            redraw();
 
-            // Рисуем временную линию
-            drawLine(startX, startY, currentX, currentY, true);
-            drawArc(startX, startY, true)
-        });
-
-        // Завершение рисования
-        canvas.addEventListener('mouseup', () => {
             if (isDrawing) {
-                // Рисуем финальную линию
-                drawLine(startX, startY, currentX, currentY, false);
-                drawArc(startX, startY, false)
-                // Сохраняем линию с её параметрами
-                lines.push({
-                    x1: startX,
-                    y1: startY,
-                    x2: currentX,
-                    y2: currentY,
-                    color: colorPicker.value,
-                    width: lineWidth.value
-                });
-                arc.push({
-                    x: startX,
-                    y: startY,
-                    color: colorPicker.value
-                });
-                arc.push({
-                    x: currentX,
-                    y: currentY,
-                    color: colorPicker.value
-                });
+                redraw();
+                // Draw preview line
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(currentX, currentY);
+                ctx.strokeStyle = colorPicker.value;
+                ctx.lineWidth = lineWidth.value;
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+
+                // Preview endpoint circle
+                ctx.beginPath();
+                ctx.arc(currentX, currentY, NODE_RADIUS, 0, Math.PI * 2);
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
             }
-            isDrawing = false;
         });
 
-        // Выход за пределы
+        canvas.addEventListener('mouseup', () => {
+            if (!isDrawing) return;
+
+            // Finalize line
+            const endSnap = findNodeNear(currentX, currentY);
+            let endX = endSnap ? endSnap.x : currentX;
+            let endY = endSnap ? endSnap.y : currentY;
+
+            // Save line
+            lines.push({
+                x1: startX,
+                y1: startY,
+                x2: endX,
+                y2: endY,
+                color: colorPicker.value,
+                width: lineWidth.value
+            });
+
+            // Ensure both endpoints are in nodes
+            addNode(startX, startY, colorPicker.value);
+            addNode(endX, endY, colorPicker.value);
+
+            isDrawing = false;
+            redraw(); // Redraw without preview
+        });
+
         canvas.addEventListener('mouseout', () => {
-            isDrawing = false;
+            if (isDrawing) {
+                // Optionally cancel drawing on leave
+                isDrawing = false;
+            }
         });
 
-        // Функция рисования линии
-        function drawLine(x1, y1, x2, y2, isPreview) {
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.strokeStyle = colorPicker.value;
-            ctx.lineWidth = lineWidth.value;
-            ctx.lineCap = 'round';
-
-            if (isPreview) {
-                ctx.setLineDash([5, 5]); // Пунктир для предпросмотра
-            } else {
-                ctx.setLineDash([]); // Сплошная линия
-            }
-
-            ctx.stroke();
-            drawArc(x2, y2, isPreview)
-        }
-        function drawArc(x, y, isPreview) {
-            ctx.beginPath();
-            ctx.arc(x, y, NODE_RADIUS, 0, 2 * Math.PI);
-            if (isPreview) {
-                ctx.setLineDash([5, 5]); // Пунктир для предпросмотра
-            } else {
-                ctx.setLineDash([]); // Сплошная линия
-            }
-            ctx.stroke();
-
-        }
-        // Перерисовка канваса (сохраняет все нарисованные линии)
         function redraw() {
-            // Очищаем канвас
-            clearCanvas();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Перерисовываем все сохранённые линии
+            // Draw all lines
             lines.forEach(line => {
                 ctx.beginPath();
                 ctx.moveTo(line.x1, line.y1);
@@ -180,19 +159,21 @@
                 ctx.setLineDash([]);
                 ctx.stroke();
             });
-            arc.forEach(arc => {
-                ctx.beginPath();
-                ctx.arc(arc.x, arc.y, NODE_RADIUS, 0, 2 * Math.PI);
-                ctx.stroke();
-            })
 
+            // Draw all nodes
+            nodes.forEach(node => {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
+                ctx.strokeStyle = node.color;
+                ctx.stroke();
+            });
         }
 
-        // Очистка канваса
         function clearCanvas() {
+            lines = [];
+            nodes = [];
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
     </script>
 </body>
-
 </html>
