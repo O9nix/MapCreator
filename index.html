@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Прямые линии на канвасе</title>
+    <title>Прямые линии и регионы</title>
     <style>
         canvas {
-            border: 2px solid #0000; /* fixed typo */
-            cursor: crosshair;
+            border: 2px solid #000;
+            cursor: pointer;
         }
         .controls {
             margin: 10px 0;
@@ -21,6 +21,7 @@
         <button onclick="clearCanvas()">Очистить</button>
         <label>Цвет: <input type="color" id="colorPicker" value="#000000"></label>
         <label>Путь: <input type="checkbox" id="path"></label>
+        <label>Редактирование: <input type="checkbox" id="mode"></label>
         <label>Толщина: <input type="range" id="lineWidth" min="1" max="20" value="2"></label>
     </div>
     <canvas id="drawingCanvas" width="800" height="600"></canvas>
@@ -31,17 +32,21 @@
         const colorPicker = document.getElementById('colorPicker');
         const lineWidth = document.getElementById('lineWidth');
         const pathCheckbox = document.getElementById('path');
+        const modeCheckbox = document.getElementById('mode');
 
         const NODE_RADIUS = 6;
-        const SNAP_TOLERANCE = 10; // pixels
+        const SNAP_TOLERANCE = 12;
 
         let isDrawing = false;
         let startX = 0, startY = 0;
         let currentX = 0, currentY = 0;
-        let lines = [];
-        let nodes = []; // store unique nodes: {x, y, color}
+        let lines = [];   // { x1, y1, x2, y2, color, width, startNodeIndex, endNodeIndex }
+        let nodes = [];   // { x, y, color }
+        let draggedNodeIndex = null;
+        let regions = []; // { nodeLoop: [i1, i2, ...], lineIndices: [...], color }
 
-        // Helper: find node near (x, y)
+        // === Вспомогательные функции ===
+
         function findNodeNear(x, y) {
             for (let i = 0; i < nodes.length; i++) {
                 const node = nodes[i];
@@ -54,48 +59,128 @@
             return null;
         }
 
-        // Add node only if not near existing one
-        function addNode(x, y, color) {
-            const existing = findNodeNear(x, y);
-            if (existing) {
-                return existing; // reuse existing
-            }
-            const newNode = { x, y, color };
-            nodes.push(newNode);
-            return { index: nodes.length - 1, x, y };
+        function createNode(x, y, color) {
+            nodes.push({ x, y, color });
+            return nodes.length - 1;
         }
+
+        function moveNode(index, newX, newY) {
+            nodes[index].x = newX;
+            nodes[index].y = newY;
+            for (const line of lines) {
+                if (line.startNodeIndex === index) {
+                    line.x1 = newX;
+                    line.y1 = newY;
+                }
+                if (line.endNodeIndex === index) {
+                    line.x2 = newX;
+                    line.y2 = newY;
+                }
+            }
+            // Пересчитываем регионы? → сложно, поэтому пока не поддерживаем редактирование регионов
+            // Для простоты: после редактирования регионы могут стать некорректными
+        }
+
+        // Поиск пути между двумя узлами (DFS), без использования запрещённого ребра
+        function findPathBetween(startIdx, endIdx, excludeLineIndex = -1) {
+            const visited = new Set();
+            const stack = [{ node: startIdx, path: [] }];
+
+            while (stack.length > 0) {
+                const { node, path } = stack.pop();
+                if (visited.has(node)) continue;
+                visited.add(node);
+
+                if (node === endIdx) {
+                    return path; // массив индексов линий
+                }
+
+                // Ищем все линии, исходящие из этого узла
+                for (let i = 0; i < lines.length; i++) {
+                    if (i === excludeLineIndex) continue;
+                    const line = lines[i];
+                    if (line.startNodeIndex === node || line.endNodeIndex === node) {
+                        const nextNode = (line.startNodeIndex === node) ? line.endNodeIndex : line.startNodeIndex;
+                        if (!visited.has(nextNode)) {
+                            stack.push({ node: nextNode, path: [...path, i] });
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        // Проверка, находится ли точка внутри многоугольника (чётность пересечений)
+        function isPointInPolygon(x, y, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x, yi = polygon[i].y;
+                const xj = polygon[j].x, yj = polygon[j].y;
+
+                const intersect = ((yi > y) !== (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        // === Обработка событий ===
 
         canvas.addEventListener('mousedown', (e) => {
             const x = e.offsetX;
             const y = e.offsetY;
 
-            let snap = findNodeNear(x, y);
-            if (snap) {
-                startX = snap.x;
-                startY = snap.y;
-            } else if (pathCheckbox.checked && lines.length > 0) {
-                // Path mode: start from last line's end
+            // Сначала проверяем: клик по региону?
+            if (!modeCheckbox.checked && !isDrawing) {
+                for (let i = 0; i < regions.length; i++) {
+                    const region = regions[i];
+                    const polygon = region.nodeLoop.map(idx => nodes[idx]);
+                    if (isPointInPolygon(x, y, polygon)) {
+                        console.log("Клик по региону №", i, region);
+                        // Можно выделить, показать tooltip и т.д.
+                        return;
+                    }
+                }
+            }
+
+            const nearNode = findNodeNear(x, y);
+
+            if (modeCheckbox.checked && nearNode) {
+                draggedNodeIndex = nearNode.index;
+                isDrawing = false;
+                return;
+            }
+
+            draggedNodeIndex = null;
+
+            if (pathCheckbox.checked && lines.length > 0) {
                 const lastLine = lines[lines.length - 1];
                 startX = lastLine.x2;
                 startY = lastLine.y2;
             } else {
-                // Normal mode or first line
-                startX = x;
-                startY = y;
-                // Add start node only if not snapped
-                if (!snap) addNode(startX, startY, colorPicker.value);
+                if (nearNode) {
+                    startX = nearNode.x;
+                    startY = nearNode.y;
+                } else {
+                    startX = x;
+                    startY = y;
+                }
             }
 
             isDrawing = true;
+            currentX = startX;
+            currentY = startY;
         });
 
         canvas.addEventListener('mousemove', (e) => {
             currentX = e.offsetX;
             currentY = e.offsetY;
 
-            if (isDrawing) {
+            if (draggedNodeIndex !== null) {
+                moveNode(draggedNodeIndex, currentX, currentY);
                 redraw();
-                // Draw preview line
+            } else if (isDrawing) {
+                redraw();
                 ctx.beginPath();
                 ctx.moveTo(startX, startY);
                 ctx.lineTo(currentX, currentY);
@@ -104,51 +189,103 @@
                 ctx.setLineDash([5, 5]);
                 ctx.stroke();
 
-                // Preview endpoint circle
                 ctx.beginPath();
                 ctx.arc(currentX, currentY, NODE_RADIUS, 0, Math.PI * 2);
+                ctx.strokeStyle = colorPicker.value;
                 ctx.setLineDash([5, 5]);
                 ctx.stroke();
             }
         });
 
         canvas.addEventListener('mouseup', () => {
+            if (draggedNodeIndex !== null) {
+                draggedNodeIndex = null;
+                return;
+            }
+
             if (!isDrawing) return;
 
-            // Finalize line
-            const endSnap = findNodeNear(currentX, currentY);
-            let endX = endSnap ? endSnap.x : currentX;
-            let endY = endSnap ? endSnap.y : currentY;
+            const endNear = findNodeNear(currentX, currentY);
+            let endX, endY, endNodeIndex;
 
-            // Save line
+            if (endNear) {
+                endX = endNear.x;
+                endY = endNear.y;
+                endNodeIndex = endNear.index;
+            } else {
+                endX = currentX;
+                endY = currentY;
+                endNodeIndex = createNode(endX, endY, colorPicker.value);
+            }
+
+            let startNodeIndex;
+            const startNear = findNodeNear(startX, startY);
+            if (startNear) {
+                startNodeIndex = startNear.index;
+            } else {
+                startNodeIndex = createNode(startX, startY, colorPicker.value);
+            }
+
+            // Добавляем линию
+            const newLineIndex = lines.length;
             lines.push({
                 x1: startX,
                 y1: startY,
                 x2: endX,
                 y2: endY,
                 color: colorPicker.value,
-                width: lineWidth.value
+                width: lineWidth.value,
+                startNodeIndex,
+                endNodeIndex
             });
 
-            // Ensure both endpoints are in nodes
-            addNode(startX, startY, colorPicker.value);
-            addNode(endX, endY, colorPicker.value);
+            // === Проверка на замкнутый контур ===
+            // Если startNodeIndex == endNodeIndex — это петля (замкнутый контур из одной линии)
+            if (startNodeIndex === endNodeIndex) {
+                // Петля — создаём регион из одного узла (визуально странно, но формально)
+                regions.push({
+                    nodeLoop: [startNodeIndex],
+                    lineIndices: [newLineIndex],
+                    color: colorPicker.value
+                });
+            } else {
+                // Ищем путь между start и end, НЕ используя новую линию
+                const existingPath = findPathBetween(startNodeIndex, endNodeIndex, newLineIndex);
+                if (existingPath) {
+                    // Цикл найден! Собираем последовательность узлов
+                    const nodeLoop = [startNodeIndex];
+                    let current = startNodeIndex;
+                    for (const lineIdx of existingPath) {
+                        const line = lines[lineIdx];
+                        const next = (line.startNodeIndex === current) ? line.endNodeIndex : line.startNodeIndex;
+                        nodeLoop.push(next);
+                        current = next;
+                    }
+                    // Теперь замыкаем новой линией (но в nodeLoop она уже замкнута через existingPath)
+
+                    regions.push({
+                        nodeLoop: nodeLoop,
+                        lineIndices: [...existingPath, newLineIndex],
+                        color: colorPicker.value
+                    });
+                }
+            }
 
             isDrawing = false;
-            redraw(); // Redraw without preview
+            redraw();
         });
 
         canvas.addEventListener('mouseout', () => {
-            if (isDrawing) {
-                // Optionally cancel drawing on leave
+            if (isDrawing || draggedNodeIndex !== null) {
                 isDrawing = false;
+                draggedNodeIndex = null;
             }
         });
 
         function redraw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw all lines
+            // Рисуем линии
             lines.forEach(line => {
                 ctx.beginPath();
                 ctx.moveTo(line.x1, line.y1);
@@ -156,23 +293,28 @@
                 ctx.strokeStyle = line.color;
                 ctx.lineWidth = line.width;
                 ctx.lineCap = 'round';
-                ctx.setLineDash([]);
                 ctx.stroke();
             });
 
-            // Draw all nodes
+            // Рисуем узлы
             nodes.forEach(node => {
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
-                ctx.strokeStyle = node.color;
+                ctx.fillStyle = node.color;
+                ctx.fill();
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
                 ctx.stroke();
             });
+
+            // Опционально: подсвечивать регионы при наведении (не реализовано)
         }
 
         function clearCanvas() {
             lines = [];
             nodes = [];
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            regions = [];
+            redraw();
         }
     </script>
 </body>
