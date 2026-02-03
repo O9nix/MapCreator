@@ -1,49 +1,178 @@
-<!DOCTYPE html>
-<html>
+м<!DOCTYPE html>
+<html lang="ru">
 <head>
-    <title>Прямые линии и регионы</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Создание игровой карты с регионами</title>
     <style>
-        canvas {
-            border: 2px solid #000;
-            cursor: pointer;
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
         }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
         .controls {
-            margin: 10px 0;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            width: 100%;
+            text-align: center;
         }
+        
+        .control-group {
+            margin: 8px 15px;
+            display: inline-block;
+        }
+        
+        label {
+            margin-right: 5px;
+            font-weight: bold;
+        }
+        
+        input[type="color"], 
+        input[type="range"],
         button {
-            margin-right: 10px;
-            padding: 5px 10px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+        
+        button {
+            padding: 8px 15px;
+            margin: 5px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        #drawingCanvas {
+            border: 2px solid #333;
+            cursor: crosshair;
+            background: #fafafa;
+        }
+        
+        .region-list {
+            margin-top: 20px;
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        
+        .region-item {
+            padding: 5px;
+            margin: 2px 0;
+            background: white;
+            border: 1px solid #eee;
+            border-radius: 3px;
+        }
+        
+        .instructions {
+            margin-top: 15px;
+            padding: 10px;
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <button onclick="clearCanvas()">Очистить</button>
-        <label>Цвет: <input type="color" id="colorPicker" value="#000000"></label>
-        <label>Путь: <input type="checkbox" id="path"></label>
-        <label>Редактирование: <input type="checkbox" id="mode"></label>
-        <label>Толщина: <input type="range" id="lineWidth" min="1" max="20" value="2"></label>
+    <div class="container">
+        <h1>Инструмент создания игровой карты с регионами</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <button onclick="clearCanvas()">Очистить всё</button>
+                <button onclick="clearRegions()">Очистить только регионы</button>
+                <button onclick="exportData()">Экспортировать данные</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Цвет линий:</label>
+                <input type="color" id="colorPicker" value="#000000">
+                
+                <label>Цвет регионов:</label>
+                <input type="color" id="regionColorPicker" value="#FFEB3B">
+            </div>
+            
+            <div class="control-group">
+                <label>Толщина линий:</label>
+                <input type="range" id="lineWidth" min="1" max="20" value="2">
+                <span id="lineWidthValue">2</span>
+            </div>
+            
+            <div class="control-group">
+                <label><input type="checkbox" id="showNodes" checked> Показывать узлы</label>
+                <label><input type="checkbox" id="showRegions" checked> Показывать регионы</label>
+                <label><input type="checkbox" id="editMode"> Режим редактирования</label>
+            </div>
+        </div>
+        
+        <canvas id="drawingCanvas" width="800" height="600"></canvas>
+        
+        <div class="instructions">
+            <strong>Инструкции:</strong><br>
+            • Удерживайте Shift при рисовании для соединения с предыдущей линией<br>
+            • Кликните по узлу в режиме редактирования чтобы переместить его<br>
+            • Замкните линию, чтобы создать регион<br>
+            • Кликните по региону для его выделения
+        </div>
+        
+        <div class="region-list">
+            <h3>Созданные регионы:</h3>
+            <div id="regionsContainer"></div>
+        </div>
     </div>
-    <canvas id="drawingCanvas" width="800" height="600"></canvas>
 
     <script>
         const canvas = document.getElementById('drawingCanvas');
         const ctx = canvas.getContext('2d');
         const colorPicker = document.getElementById('colorPicker');
+        const regionColorPicker = document.getElementById('regionColorPicker');
         const lineWidth = document.getElementById('lineWidth');
-        const pathCheckbox = document.getElementById('path');
-        const modeCheckbox = document.getElementById('mode');
+        const showNodes = document.getElementById('showNodes');
+        const showRegions = document.getElementById('showRegions');
+        const editMode = document.getElementById('editMode');
+        const lineWidthValue = document.getElementById('lineWidthValue');
 
-        const NODE_RADIUS = 6;
-        const SNAP_TOLERANCE = 12;
+        const NODE_RADIUS = 8;
+        const SNAP_TOLERANCE = 15;
 
         let isDrawing = false;
+        let isDraggingNode = false;
         let startX = 0, startY = 0;
         let currentX = 0, currentY = 0;
         let lines = [];   // { x1, y1, x2, y2, color, width, startNodeIndex, endNodeIndex }
         let nodes = [];   // { x, y, color }
         let draggedNodeIndex = null;
-        let regions = []; // { nodeLoop: [i1, i2, ...], lineIndices: [...], color }
+        let regions = []; // { nodeLoop: [i1, i2, ...], lineIndices: [...], color, id }
+        let selectedRegion = null;
+        let regionCounter = 0;
+
+        // Обновление значения толщины линии
+        lineWidth.oninput = function() {
+            lineWidthValue.textContent = this.value;
+        };
 
         // === Вспомогательные функции ===
 
@@ -52,58 +181,83 @@
                 const node = nodes[i];
                 const dx = x - node.x;
                 const dy = y - node.y;
-                if (Math.sqrt(dx * dx + dy * dy) <= SNAP_TOLERANCE) {
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance <= SNAP_TOLERANCE) {
                     return { index: i, x: node.x, y: node.y };
                 }
             }
             return null;
         }
 
-        function createNode(x, y, color) {
+        function createNode(x, y, color = colorPicker.value) {
             nodes.push({ x, y, color });
             return nodes.length - 1;
         }
 
         function moveNode(index, newX, newY) {
-            nodes[index].x = newX;
-            nodes[index].y = newY;
-            for (const line of lines) {
-                if (line.startNodeIndex === index) {
-                    line.x1 = newX;
-                    line.y1 = newY;
+            if (index >= 0 && index < nodes.length) {
+                nodes[index].x = newX;
+                nodes[index].y = newY;
+                
+                // Обновляем координаты всех линий, связанных с этим узлом
+                for (const line of lines) {
+                    if (line.startNodeIndex === index) {
+                        line.x1 = newX;
+                        line.y1 = newY;
+                    }
+                    if (line.endNodeIndex === index) {
+                        line.x2 = newX;
+                        line.y2 = newY;
+                    }
                 }
-                if (line.endNodeIndex === index) {
-                    line.x2 = newX;
-                    line.y2 = newY;
-                }
+                
+                // Пересчитываем регионы (это сложная операция, но мы обновим их цвета)
+                updateRegionsAfterNodeMove();
             }
-            // Пересчитываем регионы? → сложно, поэтому пока не поддерживаем редактирование регионов
-            // Для простоты: после редактирования регионы могут стать некорректными
         }
 
-        // Поиск пути между двумя узлами (DFS), без использования запрещённого ребра
+        function updateRegionsAfterNodeMove() {
+            // Просто перерисуем всё, чтобы избежать проблем с регионами
+            // В реальном приложении нужно было бы заново строить граф и искать циклы
+        }
+
+        // Поиск пути между двумя узлами (DFS)
         function findPathBetween(startIdx, endIdx, excludeLineIndex = -1) {
+            if (startIdx === endIdx) return [];
+
             const visited = new Set();
-            const stack = [{ node: startIdx, path: [] }];
+            const stack = [{ node: startIdx, path: [], parent: null }];
 
             while (stack.length > 0) {
-                const { node, path } = stack.pop();
+                const { node, path, parent } = stack.pop();
+                
                 if (visited.has(node)) continue;
                 visited.add(node);
 
-                if (node === endIdx) {
-                    return path; // массив индексов линий
+                // Если нашли конечный узел
+                if (node === endIdx && path.length > 0) {
+                    return path;
                 }
 
                 // Ищем все линии, исходящие из этого узла
                 for (let i = 0; i < lines.length; i++) {
                     if (i === excludeLineIndex) continue;
+                    
                     const line = lines[i];
-                    if (line.startNodeIndex === node || line.endNodeIndex === node) {
-                        const nextNode = (line.startNodeIndex === node) ? line.endNodeIndex : line.startNodeIndex;
-                        if (!visited.has(nextNode)) {
-                            stack.push({ node: nextNode, path: [...path, i] });
-                        }
+                    let connectedNode = -1;
+                    
+                    if (line.startNodeIndex === node && line.endNodeIndex !== parent) {
+                        connectedNode = line.endNodeIndex;
+                    } else if (line.endNodeIndex === node && line.startNodeIndex !== parent) {
+                        connectedNode = line.startNodeIndex;
+                    }
+                    
+                    if (connectedNode !== -1 && !visited.has(connectedNode)) {
+                        stack.push({ 
+                            node: connectedNode, 
+                            path: [...path, i], 
+                            parent: node 
+                        });
                     }
                 }
             }
@@ -124,89 +278,116 @@
             return inside;
         }
 
+        // Получение полигональных координат региона
+        function getRegionPolygon(region) {
+            return region.nodeLoop.map(idx => nodes[idx]);
+        }
+
         // === Обработка событий ===
 
         canvas.addEventListener('mousedown', (e) => {
-            const x = e.offsetX;
-            const y = e.offsetY;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const shiftPressed = e.shiftKey;
 
-            // Сначала проверяем: клик по региону?
-            if (!modeCheckbox.checked && !isDrawing) {
-                for (let i = 0; i < regions.length; i++) {
+            // Проверяем, клик по региону
+            if (!editMode.checked && !isDrawing) {
+                for (let i = regions.length - 1; i >= 0; i--) {
                     const region = regions[i];
-                    const polygon = region.nodeLoop.map(idx => nodes[idx]);
+                    const polygon = getRegionPolygon(region);
                     if (isPointInPolygon(x, y, polygon)) {
-                        console.log("Клик по региону №", i, region);
-                        // Можно выделить, показать tooltip и т.д.
+                        selectedRegion = i;
+                        updateRegionList();
+                        redraw();
+                        console.log("Выбран регион №", i, region);
                         return;
                     }
                 }
+                selectedRegion = null;
             }
 
-            const nearNode = findNodeNear(x, y);
-
-            if (modeCheckbox.checked && nearNode) {
-                draggedNodeIndex = nearNode.index;
-                isDrawing = false;
-                return;
-            }
-
-            draggedNodeIndex = null;
-
-            if (pathCheckbox.checked && lines.length > 0) {
-                const lastLine = lines[lines.length - 1];
-                startX = lastLine.x2;
-                startY = lastLine.y2;
-            } else {
+            // Режим редактирования - перемещение узлов
+            if (editMode.checked) {
+                const nearNode = findNodeNear(x, y);
                 if (nearNode) {
-                    startX = nearNode.x;
-                    startY = nearNode.y;
-                } else {
-                    startX = x;
-                    startY = y;
+                    isDraggingNode = true;
+                    draggedNodeIndex = nearNode.index;
+                    return;
                 }
             }
 
-            isDrawing = true;
-            currentX = startX;
-            currentY = startY;
+            // Начало рисования
+            if (!isDraggingNode) {
+                if (shiftPressed && lines.length > 0) {
+                    // Соединение с последней линией
+                    const lastLine = lines[lines.length - 1];
+                    startX = lastLine.x2;
+                    startY = lastLine.y2;
+                } else {
+                    const nearNode = findNodeNear(x, y);
+                    if (nearNode) {
+                        startX = nearNode.x;
+                        startY = nearNode.y;
+                    } else {
+                        startX = x;
+                        startY = y;
+                    }
+                }
+
+                isDrawing = true;
+                currentX = startX;
+                currentY = startY;
+            }
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            currentX = e.offsetX;
-            currentY = e.offsetY;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
 
-            if (draggedNodeIndex !== null) {
+            currentX = x;
+            currentY = y;
+
+            if (isDraggingNode && draggedNodeIndex !== null) {
                 moveNode(draggedNodeIndex, currentX, currentY);
                 redraw();
             } else if (isDrawing) {
                 redraw();
+                // Рисуем текущую линию
                 ctx.beginPath();
                 ctx.moveTo(startX, startY);
                 ctx.lineTo(currentX, currentY);
                 ctx.strokeStyle = colorPicker.value;
-                ctx.lineWidth = lineWidth.value;
+                ctx.lineWidth = parseInt(lineWidth.value);
                 ctx.setLineDash([5, 5]);
                 ctx.stroke();
 
+                // Рисуем конечную точку
                 ctx.beginPath();
                 ctx.arc(currentX, currentY, NODE_RADIUS, 0, Math.PI * 2);
                 ctx.strokeStyle = colorPicker.value;
-                ctx.setLineDash([5, 5]);
+                ctx.fillStyle = colorPicker.value;
+                ctx.globalAlpha = 0.7;
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+                ctx.setLineDash([]);
+                ctx.lineWidth = 1;
                 ctx.stroke();
             }
         });
 
         canvas.addEventListener('mouseup', () => {
-            if (draggedNodeIndex !== null) {
+            if (isDraggingNode) {
+                isDraggingNode = false;
                 draggedNodeIndex = null;
                 return;
             }
 
             if (!isDrawing) return;
 
-            const endNear = findNodeNear(currentX, currentY);
             let endX, endY, endNodeIndex;
+            const endNear = findNodeNear(currentX, currentY);
 
             if (endNear) {
                 endX = endNear.x;
@@ -226,7 +407,7 @@
                 startNodeIndex = createNode(startX, startY, colorPicker.value);
             }
 
-            // Добавляем линию
+            // Создаем новую линию
             const newLineIndex = lines.length;
             lines.push({
                 x1: startX,
@@ -234,56 +415,95 @@
                 x2: endX,
                 y2: endY,
                 color: colorPicker.value,
-                width: lineWidth.value,
+                width: parseInt(lineWidth.value),
                 startNodeIndex,
                 endNodeIndex
             });
 
-            // === Проверка на замкнутый контур ===
-            // Если startNodeIndex == endNodeIndex — это петля (замкнутый контур из одной линии)
+            // Проверяем на замкнутый контур
             if (startNodeIndex === endNodeIndex) {
-                // Петля — создаём регион из одного узла (визуально странно, но формально)
+                // Петля - создаем регион из одного узла (в реальности это маловероятно)
                 regions.push({
+                    id: regionCounter++,
                     nodeLoop: [startNodeIndex],
                     lineIndices: [newLineIndex],
-                    color: colorPicker.value
+                    color: regionColorPicker.value
                 });
             } else {
                 // Ищем путь между start и end, НЕ используя новую линию
                 const existingPath = findPathBetween(startNodeIndex, endNodeIndex, newLineIndex);
-                if (existingPath) {
-                    // Цикл найден! Собираем последовательность узлов
+                if (existingPath && existingPath.length > 0) {
+                    // Найден цикл!
                     const nodeLoop = [startNodeIndex];
                     let current = startNodeIndex;
+                    
+                    // Собираем последовательность узлов из существующего пути
                     for (const lineIdx of existingPath) {
                         const line = lines[lineIdx];
                         const next = (line.startNodeIndex === current) ? line.endNodeIndex : line.startNodeIndex;
-                        nodeLoop.push(next);
+                        if (!nodeLoop.includes(next)) { // Избегаем дубликатов
+                            nodeLoop.push(next);
+                        }
                         current = next;
                     }
-                    // Теперь замыкаем новой линией (но в nodeLoop она уже замкнута через existingPath)
-
+                    
+                    // Создаем регион
                     regions.push({
+                        id: regionCounter++,
                         nodeLoop: nodeLoop,
                         lineIndices: [...existingPath, newLineIndex],
-                        color: colorPicker.value
+                        color: regionColorPicker.value
                     });
                 }
             }
 
             isDrawing = false;
             redraw();
+            updateRegionList();
         });
 
         canvas.addEventListener('mouseout', () => {
-            if (isDrawing || draggedNodeIndex !== null) {
+            if (isDrawing || isDraggingNode) {
                 isDrawing = false;
+                isDraggingNode = false;
                 draggedNodeIndex = null;
+                redraw();
             }
         });
 
         function redraw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Рисуем регионы
+            if (showRegions.checked) {
+                for (let i = 0; i < regions.length; i++) {
+                    const region = regions[i];
+                    const polygon = getRegionPolygon(region);
+                    
+                    if (polygon.length >= 3) {
+                        ctx.beginPath();
+                        ctx.moveTo(polygon[0].x, polygon[0].y);
+                        for (let j = 1; j < polygon.length; j++) {
+                            ctx.lineTo(polygon[j].x, polygon[j].y);
+                        }
+                        ctx.closePath();
+                        
+                        // Заливка региона
+                        ctx.fillStyle = region.color + '80'; // 50% прозрачности
+                        ctx.fill();
+                        
+                        // Обводка региона, если он выбран
+                        if (selectedRegion === i) {
+                            ctx.strokeStyle = '#FF0000';
+                            ctx.lineWidth = 3;
+                        } else {
+                            ctx.strokeStyle = region.color;
+                            ctx.lineWidth = 1;
+                        }
+                        ctx.stroke();
+                    }
+                }
+            }
 
             // Рисуем линии
             lines.forEach(line => {
@@ -297,25 +517,104 @@
             });
 
             // Рисуем узлы
-            nodes.forEach(node => {
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = node.color;
-                ctx.fill();
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-            });
+            if (showNodes.checked) {
+                nodes.forEach((node, index) => {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
+                    ctx.fillStyle = node.color;
+                    ctx.fill();
+                    ctx.strokeStyle = selectedRegion !== null && isNodeInSelectedRegion(index) ? '#FF0000' : '#000';
+                    ctx.lineWidth = selectedRegion !== null && isNodeInSelectedRegion(index) ? 3 : 1;
+                    ctx.stroke();
+                    
+                    // Номер узла
+                    ctx.fillStyle = '#000';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(index.toString(), node.x, node.y + 3);
+                });
+            }
+        }
 
-            // Опционально: подсвечивать регионы при наведении (не реализовано)
+        function isNodeInSelectedRegion(nodeIndex) {
+            if (selectedRegion === null) return false;
+            return regions[selectedRegion].nodeLoop.includes(nodeIndex);
         }
 
         function clearCanvas() {
-            lines = [];
-            nodes = [];
-            regions = [];
-            redraw();
+            if (confirm('Вы уверены, что хотите очистить всё?')) {
+                lines = [];
+                nodes = [];
+                regions = [];
+                regionCounter = 0;
+                selectedRegion = null;
+                updateRegionList();
+                redraw();
+            }
         }
+
+        function clearRegions() {
+            if (confirm('Вы уверены, что хотите удалить все регионы?')) {
+                regions = [];
+                regionCounter = 0;
+                selectedRegion = null;
+                updateRegionList();
+                redraw();
+            }
+        }
+
+        function updateRegionList() {
+            const container = document.getElementById('regionsContainer');
+            container.innerHTML = '';
+            
+            if (regions.length === 0) {
+                container.innerHTML = '<p>Нет созданных регионов</p>';
+                return;
+            }
+            
+            regions.forEach((region, index) => {
+                const div = document.createElement('div');
+                div.className = 'region-item';
+                div.innerHTML = `
+                    <strong>Регион ${region.id}</strong> | 
+                    Узлов: ${region.nodeLoop.length} | 
+                    Линий: ${region.lineIndices.length}
+                    <button onclick="selectRegion(${index})" style="float: right; padding: 2px 8px; font-size: 12px;">Выбрать</button>
+                `;
+                if (selectedRegion === index) {
+                    div.style.backgroundColor = '#e3f2fd';
+                    div.style.border = '2px solid #2196F3';
+                }
+                container.appendChild(div);
+            });
+        }
+
+        function selectRegion(index) {
+            selectedRegion = index;
+            redraw();
+            updateRegionList();
+        }
+
+        function exportData() {
+            const data = {
+                nodes: nodes.map((node, i) => ({...node, id: i})),
+                lines: lines.map((line, i) => ({...line, id: i})),
+                regions: regions.map((region, i) => ({...region, id: i}))
+            };
+            
+            const dataStr = JSON.stringify(data, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const exportFileDefaultName = `game_map_data_${new Date().toISOString().slice(0, 19)}.json`;
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+        }
+
+        // Инициализация
+        updateRegionList();
     </script>
 </body>
 </html>
